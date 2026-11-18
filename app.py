@@ -4,6 +4,7 @@ import json
 import pandas as pd
 import streamlit as st
 from io import BytesIO
+from pathlib import Path
 
 from core.reconciliation import Sovereign167VReconciler, InputValidationError, validate_headers
 from modules.financial_statements import build_financial_statements
@@ -44,18 +45,25 @@ tabs = st.tabs(["Reconciliation", "Financial Statements", "Book-to-Tax", "Deprec
 
 with tabs[0]:
     upload = st.file_uploader("Ledger CSV: Date, Amount, Type", type=["csv"], key="ledger_upload")
+    use_sample = upload is None and st.checkbox("Try a sample ledger", key="use_sample_ledger")
+    start_sample = use_sample and not st.session_state.get("sample_active", False)
+    st.session_state["sample_active"] = use_sample
+    if use_sample:
+        sample = Path(__file__).parent / "sample_data" / "sample_ledger.csv"
+        upload = BytesIO(sample.read_bytes())
+        st.caption("Synthetic sample ledger")
     col1, col2, col3 = st.columns(3)
     opening = col1.text_input("Opening balance", "1000.00", key="opening")
     closing = col2.text_input("Expected closing balance", "1250.00", key="closing")
     tolerance = col3.text_input("Tolerance", "0.01", key="tolerance")
-    ledger_key = upload_digest(upload)
+    ledger_key = ("sample:" if use_sample else "upload:") + upload_digest(upload)
     recon_fingerprint = sha256(json.dumps([ledger_key, opening, closing, tolerance], separators=(",", ":")).encode()).hexdigest()
     clear_if_changed("recon_input_fingerprint", recon_fingerprint, "recon_result", "recon_ledger", "recon_parameters")
     if upload is not None:
         try:
             ledger = read_csv_upload(upload)
             st.dataframe(ledger, use_container_width=True)
-            if st.button("Run reconciliation", key="run_reconciliation"):
+            if st.button("Run reconciliation", key="run_reconciliation") or start_sample:
                 reconciler = Sovereign167VReconciler(ledger, opening, closing, tolerance)
                 st.session_state["recon_result"] = reconciler.execute_reconciliation()
                 st.session_state["recon_ledger"] = ledger
