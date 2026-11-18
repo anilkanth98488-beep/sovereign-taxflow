@@ -67,7 +67,7 @@ def currency_stripper(value: Any) -> Decimal:
         sign = "-" if "-" in sign_and_currency else ("+" if "+" in sign_and_currency else "")
         amount = Decimal(sign + number.replace(",", ""))
         if paren:
-            amount = -amount
+            amount = amount.copy_negate()
     else:
         raise InputValidationError(f"Unsupported monetary type: {type(value).__name__}")
     if not amount.is_finite():
