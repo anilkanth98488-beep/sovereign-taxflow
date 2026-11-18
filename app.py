@@ -1,4 +1,5 @@
 """Sovereign TaxFlow — local Streamlit workpaper demonstration."""
+from datetime import datetime, timezone
 from hashlib import sha256
 import json
 import pandas as pd
@@ -40,7 +41,7 @@ def clear_if_changed(state_key, current_fingerprint, result_key, *extra_keys):
         st.session_state[state_key] = current_fingerprint
 
 
-tabs = st.tabs(["Reconciliation", "Financial Statements", "Book-to-Tax", "Depreciation", "Document Organizer"])
+tabs = st.tabs(["Reconciliation", "Financial Statements", "Book-to-Tax", "Depreciation", "Document Organizer", "Review queue"])
 
 with tabs[0]:
     upload = st.file_uploader("Ledger CSV: Date, Amount, Type", type=["csv"], key="ledger_upload")
@@ -58,6 +59,8 @@ with tabs[0]:
             if st.button("Run reconciliation", key="run_reconciliation"):
                 reconciler = Sovereign167VReconciler(ledger, opening, closing, tolerance)
                 st.session_state["recon_result"] = reconciler.execute_reconciliation()
+                # Every newly generated workpaper requires its own reviewer approval.
+                st.session_state.pop("approval_ledger_upload", None)
                 st.session_state["recon_ledger"] = ledger
                 st.session_state["recon_parameters"] = (opening, closing, tolerance)
         except Exception as exc:
@@ -109,7 +112,10 @@ with tabs[2]:
         except Exception as exc:
             st.error(str(exc))
     if st.session_state.get("bt_result"):
-        st.json(st.session_state["bt_result"])
+        adjustment = st.session_state["bt_result"]
+        st.metric("Net quantified adjustment", adjustment["net_quantified_proposed_adjustment"])
+        st.metric("Awaiting review", adjustment["unresolved_review_amount_total"])
+        st.json(adjustment)
     entity = st.selectbox("Entity form for preliminary M-3 screen", ["1120", "1120-S", "1065"])
     assets = st.text_input("Year-end total assets", "0")
     receipts = st.text_input("Total receipts (partnership screen)", "0")
@@ -172,3 +178,43 @@ with tabs[4]:
             st.error(str(exc))
     if "missing_items_result" in st.session_state:
         st.write(st.session_state["missing_items_result"])
+
+
+with tabs[5]:
+    st.caption("Session-only queue for the three checks below. Names are entered manually.")
+    state = st.session_state
+    financial = state.get("fs_result")
+    adjustment = state.get("bt_result")
+    unresolved = sum(item["review_required"] for item in adjustment["items"]) if adjustment else 0
+    checks = {
+        "Reconciliation": ("ledger_upload", "recon_input_fingerprint",
+                           result.status if result else None),
+        "Trial balance": ("tb_upload", "tb_fingerprint",
+                          financial["trial_balance_status"] if financial else None),
+        "Book-to-tax": ("book_tax_upload", "bt_fingerprint",
+                        ("REVIEW_REQUIRED" if unresolved else "CALCULATED") if adjustment else None),
+    }
+    rows = []
+    for label, (upload_key, fingerprint_key, outcome) in checks.items():
+        record_key = f"approval_{upload_key}"
+        owner = st.text_input(f"{label} preparer", key=f"owner_{upload_key}").strip()
+        reviewer = st.text_input(f"{label} reviewer", key=f"reviewer_{upload_key}").strip()
+        evidence = state.get(upload_key)
+        signature = (state[fingerprint_key], owner, reviewer, outcome)
+        approval = state.get(record_key)
+        if approval and approval["signature"] != signature:
+            del state[record_key]
+            approval = None
+        attention = outcome in {"FAIL", "OUT OF BALANCE", "REVIEW_REQUIRED"}
+        ready = outcome in {"PASS", "BALANCED", "CALCULATED"} and owner and reviewer
+        if ready and not approval and st.button(f"Sign off {label}", key=f"sign_{upload_key}"):
+            approval = {"signature": signature, "utc": datetime.now(timezone.utc).isoformat()}
+            state[record_key] = approval
+        rows.append({
+            "Required workpaper": label, "Preparer": owner, "Reviewer": reviewer,
+            "Evidence received": getattr(evidence, "name", "") if evidence is not None else "",
+            "Check result": outcome or "NOT RUN",
+            "Open discrepancy": outcome if attention else "",
+            "Signed off UTC": approval["utc"] if approval else "",
+        })
+    st.dataframe(pd.DataFrame(rows), use_container_width=True)
