@@ -1,0 +1,5 @@
+code,amount,description
+FINES_162F,250.00,Regulatory penalty - review
+MEALS_274N,100.00,Business meals - default placeholder
+CONVENIENCE_MEALS_274O,80.00,Employer convenience meals - review
+MUNI_INTEREST_103,50.00,Municipal bond interest - review
