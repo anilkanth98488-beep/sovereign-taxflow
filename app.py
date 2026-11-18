@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from hashlib import sha256
 import csv
 from pathlib import Path
+from modules.csv_mapper import map_bank_csv_to_ledger
 from modules.w2_tieout import SAMPLE, build_w2_tieout
 import json
 import pandas as pd
@@ -59,12 +60,25 @@ with tabs[0]:
     opening = col1.text_input("Opening balance", "1000.00", key="opening")
     closing = col2.text_input("Expected closing balance", "1250.00", key="closing")
     tolerance = col3.text_input("Tolerance", "0.01", key="tolerance")
+    mapping = {}
+    if upload is not None and not use_sample and st.checkbox("Map bank or accounting columns", key="map_csv"):
+        layout = st.selectbox("Amount layout", ["Signed amount", "Separate debit and credit", "Amount and type"], key="map_layout")
+        mapping["date_col"] = st.text_input("Date column", "Date", key="map_date")
+        mapping["date_format"] = st.selectbox("Source date format", ["YYYY-MM-DD", "MM/DD/YYYY", "DD/MM/YYYY"], key="map_date_format")
+        mapping["date_format"] = {"YYYY-MM-DD": None, "MM/DD/YYYY": "%m/%d/%Y", "DD/MM/YYYY": "%d/%m/%Y"}[mapping["date_format"]]
+        mapping["memo_col"] = st.text_input("Memo column (optional)", key="map_memo") or None
+        if layout == "Separate debit and credit":
+            mapping["debit_col"] = st.text_input("Debit column", "Debit", key="map_debit")
+            mapping["credit_col"] = st.text_input("Credit column", "Credit", key="map_credit")
+        else:
+            mapping["amount_col"] = st.text_input("Amount column", "Amount", key="map_amount")
+            mapping["type_col"] = st.text_input("Type column", "Type", key="map_type") if layout == "Amount and type" else None
     ledger_key = ("sample:" if use_sample else "upload:") + upload_digest(upload)
-    recon_fingerprint = sha256(json.dumps([ledger_key, opening, closing, tolerance], separators=(",", ":")).encode()).hexdigest()
+    recon_fingerprint = sha256(json.dumps([ledger_key, opening, closing, tolerance, mapping], separators=(",", ":")).encode()).hexdigest()
     clear_if_changed("recon_input_fingerprint", recon_fingerprint, "recon_result", "recon_ledger", "recon_parameters")
     if upload is not None:
         try:
-            ledger = read_csv_upload(upload)
+            ledger = map_bank_csv_to_ledger(upload.getvalue(), **mapping) if mapping else read_csv_upload(upload)
             st.dataframe(ledger, use_container_width=True)
             if st.button("Run reconciliation", key="run_reconciliation") or start_sample:
                 reconciler = Sovereign167VReconciler(ledger, opening, closing, tolerance)

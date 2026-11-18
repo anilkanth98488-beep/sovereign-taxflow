@@ -158,7 +158,7 @@ class Phase16DeepTests(unittest.TestCase):
         ast.parse(source)
         self.assertIn('encoding="utf-8-sig"', source)
         self.assertEqual(source.count("read_csv_upload(upload)"), 5)
-        self.assertIn("json.dumps([ledger_key, opening, closing, tolerance]", source)
+        self.assertIn("json.dumps([ledger_key, opening, closing, tolerance, mapping]", source)
         self.assertIn("json.dumps([form, received]", source)
         self.assertIn('"recon_ledger", "recon_parameters"', source)
 

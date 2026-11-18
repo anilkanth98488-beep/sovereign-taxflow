@@ -119,7 +119,7 @@ def map_bank_csv_to_ledger(
                 if amt > ZERO:
                     out_amt, out_type = str(amt), "CREDIT"
                 elif amt < ZERO:
-                    out_amt, out_type = str(abs(amt)), "DEBIT"
+                    out_amt, out_type = str(amt.copy_abs()), "DEBIT"
                 else:
                     raise InputValidationError(f"Row {idx}: zero signed amount cannot determine CREDIT/DEBIT.")
 
