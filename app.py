@@ -1,5 +1,6 @@
 """Sovereign TaxFlow — local Streamlit workpaper demonstration."""
 from hashlib import sha256
+import csv
 import json
 import pandas as pd
 import streamlit as st
@@ -11,6 +12,7 @@ from modules.book_to_tax import build_book_to_tax_workpaper, m3_threshold_flags
 from modules.depreciation_schedule import (
     build_depreciation_schedule, section_179_reference, partition_assets_by_tax_year
 )
+from modules.w2_tieout import SAMPLE, build_w2_tieout
 from modules.document_organizer import classify_filename, missing_item_alerts
 
 st.set_page_config(page_title="Sovereign TaxFlow", layout="wide")
@@ -40,7 +42,7 @@ def clear_if_changed(state_key, current_fingerprint, result_key, *extra_keys):
         st.session_state[state_key] = current_fingerprint
 
 
-tabs = st.tabs(["Reconciliation", "Financial Statements", "Book-to-Tax", "Depreciation", "Document Organizer"])
+tabs = st.tabs(["Reconciliation", "Financial Statements", "Book-to-Tax", "Depreciation", "Document Organizer", "1040 W-2"])
 
 with tabs[0]:
     upload = st.file_uploader("Ledger CSV: Date, Amount, Type", type=["csv"], key="ledger_upload")
@@ -172,3 +174,24 @@ with tabs[4]:
             st.error(str(exc))
     if "missing_items_result" in st.session_state:
         st.write(st.session_state["missing_items_result"])
+
+
+with tabs[-1]:
+    st.caption("2025 Form 1040 • Ordinary W-2 wages and withholding • CPA review pending")
+    st.write("Compare one return using exact cents. Use document labels only. Review corrected forms, special wage treatments and whole-dollar rounding separately.")
+    inventory = st.text_area("Expected W-2 labels, one per line", "W2-A\nW2-B", key="w2_inventory")
+    source = st.text_area("W-2 source rows (synthetic example)", SAMPLE, key="w2_source")
+    wages = st.text_input("Draft line 1a wages", "60000.00", key="w2_wages")
+    withholding = st.text_input("Draft line 25a withholding", "5500.00", key="w2_withholding")
+    fingerprint = sha256(json.dumps([inventory, source, wages, withholding]).encode()).hexdigest()
+    clear_if_changed("w2_fingerprint", fingerprint, "w2_result")
+    if st.button("Check W-2 amounts", key="run_w2"):
+        try:
+            st.session_state["w2_result"] = build_w2_tieout(source, inventory, wages, withholding)
+        except (InputValidationError, csv.Error) as exc:
+            st.error(str(exc))
+    if st.session_state.get("w2_result"):
+        workpaper = st.session_state["w2_result"]
+        st.json(workpaper)
+        st.download_button("Download W-2 workpaper (JSON)", data=json.dumps(workpaper, indent=2),
+                           file_name="w2-tieout-2025.json", mime="application/json", on_click="ignore")
