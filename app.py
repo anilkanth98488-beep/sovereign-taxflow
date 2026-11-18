@@ -59,6 +59,8 @@ with tabs[0]:
             if st.button("Run reconciliation", key="run_reconciliation"):
                 reconciler = Sovereign167VReconciler(ledger, opening, closing, tolerance)
                 st.session_state["recon_result"] = reconciler.execute_reconciliation()
+                # Every newly generated workpaper requires its own reviewer approval.
+                st.session_state.pop("approval_ledger_upload", None)
                 st.session_state["recon_ledger"] = ledger
                 st.session_state["recon_parameters"] = (opening, closing, tolerance)
         except Exception as exc:
