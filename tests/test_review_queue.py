@@ -25,3 +25,17 @@ class ReviewQueueTests(unittest.TestCase):
         self.assertIn(("metric", "Awaiting review", result["unresolved_review_amount_total"]), h.events)
         self.assertIn(("metric", "Net quantified adjustment", result["net_quantified_proposed_adjustment"]), h.events)
         self.assertNotIn("approval_book_tax_upload", h.session_state)
+
+    def test_new_pass_with_identical_inputs_requires_new_signoff(self):
+        h = _AppHarness()
+        source = (ROOT / "sample_data/sample_ledger.csv").read_bytes()
+        h.run(clicked=["run_reconciliation"], ledger_upload=_FakeUploadedFile(source, "ledger.csv"),
+              owner_ledger_upload="Preparer", reviewer_ledger_upload="Reviewer")
+        h.run(clicked=["sign_ledger_upload"])
+        h.run()
+        self.assertIn("approval_ledger_upload", h.session_state)
+        h.run(clicked=["run_reconciliation"])
+        self.assertEqual(h.session_state["recon_result"].status, "PASS")
+        self.assertNotIn("approval_ledger_upload", h.session_state)
+        h.run(clicked=["sign_ledger_upload"])
+        self.assertIn("utc", h.session_state["approval_ledger_upload"])
