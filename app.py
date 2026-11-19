@@ -1,5 +1,10 @@
 """Sovereign TaxFlow — local Streamlit workpaper demonstration."""
+from datetime import datetime, timezone
 from hashlib import sha256
+import csv
+from pathlib import Path
+from modules.csv_mapper import map_bank_csv_to_ledger
+from modules.w2_tieout import SAMPLE, build_w2_tieout
 import json
 import pandas as pd
 import streamlit as st
@@ -40,24 +45,46 @@ def clear_if_changed(state_key, current_fingerprint, result_key, *extra_keys):
         st.session_state[state_key] = current_fingerprint
 
 
-tabs = st.tabs(["Reconciliation", "Financial Statements", "Book-to-Tax", "Depreciation", "Document Organizer"])
+tabs = st.tabs(["Reconciliation", "Financial Statements", "Book-to-Tax", "Depreciation", "Document Organizer", "Review queue", "1040 W-2", "Synthetic packet"])
 
 with tabs[0]:
     upload = st.file_uploader("Ledger CSV: Date, Amount, Type", type=["csv"], key="ledger_upload")
+    use_sample = upload is None and st.checkbox("Try a sample ledger", key="use_sample_ledger")
+    start_sample = use_sample and not st.session_state.get("sample_active", False)
+    st.session_state["sample_active"] = use_sample
+    if use_sample:
+        sample = Path(__file__).parent / "sample_data" / "sample_ledger.csv"
+        upload = BytesIO(sample.read_bytes())
+        st.caption("Synthetic sample ledger")
     col1, col2, col3 = st.columns(3)
     opening = col1.text_input("Opening balance", "1000.00", key="opening")
     closing = col2.text_input("Expected closing balance", "1250.00", key="closing")
     tolerance = col3.text_input("Tolerance", "0.01", key="tolerance")
-    ledger_key = upload_digest(upload)
-    recon_fingerprint = sha256(json.dumps([ledger_key, opening, closing, tolerance], separators=(",", ":")).encode()).hexdigest()
+    mapping = {}
+    if upload is not None and not use_sample and st.checkbox("Map bank or accounting columns", key="map_csv"):
+        layout = st.selectbox("Amount layout", ["Signed amount", "Separate debit and credit", "Amount and type"], key="map_layout")
+        mapping["date_col"] = st.text_input("Date column", "Date", key="map_date")
+        mapping["date_format"] = st.selectbox("Source date format", ["YYYY-MM-DD", "MM/DD/YYYY", "DD/MM/YYYY"], key="map_date_format")
+        mapping["date_format"] = {"YYYY-MM-DD": None, "MM/DD/YYYY": "%m/%d/%Y", "DD/MM/YYYY": "%d/%m/%Y"}[mapping["date_format"]]
+        mapping["memo_col"] = st.text_input("Memo column (optional)", key="map_memo") or None
+        if layout == "Separate debit and credit":
+            mapping["debit_col"] = st.text_input("Debit column", "Debit", key="map_debit")
+            mapping["credit_col"] = st.text_input("Credit column", "Credit", key="map_credit")
+        else:
+            mapping["amount_col"] = st.text_input("Amount column", "Amount", key="map_amount")
+            mapping["type_col"] = st.text_input("Type column", "Type", key="map_type") if layout == "Amount and type" else None
+    ledger_key = ("sample:" if use_sample else "upload:") + upload_digest(upload)
+    recon_fingerprint = sha256(json.dumps([ledger_key, opening, closing, tolerance, mapping], separators=(",", ":")).encode()).hexdigest()
     clear_if_changed("recon_input_fingerprint", recon_fingerprint, "recon_result", "recon_ledger", "recon_parameters")
     if upload is not None:
         try:
-            ledger = read_csv_upload(upload)
+            ledger = map_bank_csv_to_ledger(upload.getvalue(), **mapping) if mapping else read_csv_upload(upload)
             st.dataframe(ledger, use_container_width=True)
-            if st.button("Run reconciliation", key="run_reconciliation"):
+            if st.button("Run reconciliation", key="run_reconciliation") or start_sample:
                 reconciler = Sovereign167VReconciler(ledger, opening, closing, tolerance)
                 st.session_state["recon_result"] = reconciler.execute_reconciliation()
+                # Every newly generated workpaper requires its own reviewer approval.
+                st.session_state.pop("approval_ledger_upload", None)
                 st.session_state["recon_ledger"] = ledger
                 st.session_state["recon_parameters"] = (opening, closing, tolerance)
         except Exception as exc:
@@ -109,7 +136,10 @@ with tabs[2]:
         except Exception as exc:
             st.error(str(exc))
     if st.session_state.get("bt_result"):
-        st.json(st.session_state["bt_result"])
+        adjustment = st.session_state["bt_result"]
+        st.metric("Net quantified adjustment", adjustment["net_quantified_proposed_adjustment"])
+        st.metric("Awaiting review", adjustment["unresolved_review_amount_total"])
+        st.json(adjustment)
     entity = st.selectbox("Entity form for preliminary M-3 screen", ["1120", "1120-S", "1065"])
     assets = st.text_input("Year-end total assets", "0")
     receipts = st.text_input("Total receipts (partnership screen)", "0")
@@ -172,3 +202,120 @@ with tabs[4]:
             st.error(str(exc))
     if "missing_items_result" in st.session_state:
         st.write(st.session_state["missing_items_result"])
+
+
+with tabs[5]:
+    st.caption("Session-only queue for the three checks below. Names are entered manually.")
+    state = st.session_state
+    financial = state.get("fs_result")
+    adjustment = state.get("bt_result")
+    unresolved = sum(item["review_required"] for item in adjustment["items"]) if adjustment else 0
+    checks = {
+        "Reconciliation": ("ledger_upload", "recon_input_fingerprint",
+                           result.status if result else None),
+        "Trial balance": ("tb_upload", "tb_fingerprint",
+                          financial["trial_balance_status"] if financial else None),
+        "Book-to-tax": ("book_tax_upload", "bt_fingerprint",
+                        ("REVIEW_REQUIRED" if unresolved else "CALCULATED") if adjustment else None),
+    }
+    rows = []
+    for label, (upload_key, fingerprint_key, outcome) in checks.items():
+        record_key = f"approval_{upload_key}"
+        owner = st.text_input(f"{label} preparer", key=f"owner_{upload_key}").strip()
+        reviewer = st.text_input(f"{label} reviewer", key=f"reviewer_{upload_key}").strip()
+        evidence = state.get(upload_key)
+        signature = (state[fingerprint_key], owner, reviewer, outcome)
+        approval = state.get(record_key)
+        if approval and approval["signature"] != signature:
+            del state[record_key]
+            approval = None
+        attention = outcome in {"FAIL", "OUT OF BALANCE", "REVIEW_REQUIRED"}
+        ready = outcome in {"PASS", "BALANCED", "CALCULATED"} and owner and reviewer
+        if ready and not approval and st.button(f"Sign off {label}", key=f"sign_{upload_key}"):
+            approval = {"signature": signature, "utc": datetime.now(timezone.utc).isoformat()}
+            state[record_key] = approval
+        rows.append({
+            "Required workpaper": label, "Preparer": owner, "Reviewer": reviewer,
+            "Evidence received": getattr(evidence, "name", "") if evidence is not None else "",
+            "Check result": outcome or "NOT RUN",
+            "Open discrepancy": outcome if attention else "",
+            "Signed off UTC": approval["utc"] if approval else "",
+        })
+    st.dataframe(pd.DataFrame(rows), use_container_width=True)
+
+
+with tabs[6]:
+    st.caption("2025 Form 1040 • Ordinary W-2 wages and withholding • CPA review pending")
+    st.write("Compare one return using exact cents. Use document labels only. Review corrected forms, special wage treatments and whole-dollar rounding separately.")
+    inventory = st.text_area("Expected W-2 labels, one per line", "W2-A\nW2-B", key="w2_inventory")
+    source = st.text_area("W-2 source rows (synthetic example)", SAMPLE, key="w2_source")
+    wages = st.text_input("Draft line 1a wages", "60000.00", key="w2_wages")
+    withholding = st.text_input("Draft line 25a withholding", "5500.00", key="w2_withholding")
+    fingerprint = sha256(json.dumps([inventory, source, wages, withholding]).encode()).hexdigest()
+    clear_if_changed("w2_fingerprint", fingerprint, "w2_result")
+    if st.button("Check W-2 amounts", key="run_w2"):
+        try:
+            st.session_state["w2_result"] = build_w2_tieout(source, inventory, wages, withholding)
+        except (InputValidationError, csv.Error) as exc:
+            st.error(str(exc))
+    if st.session_state.get("w2_result"):
+        workpaper = st.session_state["w2_result"]
+        st.json(workpaper)
+        st.download_button("Download W-2 workpaper (JSON)", data=json.dumps(workpaper, indent=2),
+                           file_name="w2-tieout-2025.json", mime="application/json", on_click="ignore")
+
+with tabs[7]:
+    from modules.workpaper_packet import ROLES, VERSION, run_packet
+    from modules.packet_export import export_packet
+
+    st.caption("2025 synthetic workpaper packet. Every export is a draft for reviewer sign-off.")
+    if st.checkbox("Open synthetic packet workspace", key="packet_enable"):
+        demo = st.checkbox("Use bundled synthetic sources", key="packet_sample")
+        sources = {}
+        source_errors = []
+        if demo:
+            for path in sorted((Path(__file__).parent / "sample_data/packet").glob("*.csv")):
+                sources[path.stem] = (path.name, path.read_bytes(), None)
+        else:
+            st.write("Use synthetic files only. Name each file for its role. Ledger files accept bank columns; form files use Field and JSON columns.")
+            st.caption("Role names: " + ", ".join(ROLES))
+            uploads = st.file_uploader("Synthetic packet sources", type=["csv", "xlsx", "pdf"],
+                                       accept_multiple_files=True, key="packet_uploads")
+            for upload in uploads:
+                role = Path(upload.name).stem
+                if role in sources or role not in ROLES:
+                    source_errors.append(f"Duplicate or unknown role: {role}")
+                    continue
+                sheet = None
+                if upload.name.lower().endswith(".xlsx"):
+                    sheet = st.text_input(f"{role} worksheet (required for multi-sheet files)",key=f"packet_sheet_{role}") or None
+                sources[role] = (upload.name, upload.getvalue(), sheet)
+        opening_value = st.text_input("Packet opening balance","1000.00",key="packet_opening")
+        closing_value = st.text_input("Packet control balance","1250.00",key="packet_closing")
+        map_text = st.text_input("Explicit ledger column mapping (optional JSON object)","{}",key="packet_mapping")
+        identity = [VERSION, demo, opening_value, closing_value, map_text, source_errors,
+                    [(role, name, sha256(raw).hexdigest(), sheet) for role,(name,raw,sheet) in sorted(sources.items())]]
+        clear_if_changed("packet_identity", sha256(json.dumps(identity).encode()).hexdigest(),
+                         "packet_bytes", "packet_manifest")
+        for error in source_errors:
+            st.error(error)
+        if sources and not source_errors and st.button("Build draft packet",key="packet_build"):
+            st.session_state.pop("packet_bytes", None)
+            st.session_state.pop("packet_manifest", None)
+            try:
+                mapping = json.loads(map_text)
+                if not isinstance(mapping,dict):
+                    raise ValueError("Mapping must be a JSON object.")
+                packet = run_packet(sources, opening_value, closing_value, mapping=mapping)
+                st.session_state["packet_manifest"] = packet
+                st.session_state["packet_bytes"] = export_packet(packet)
+            except Exception as exc:
+                st.error(f"Packet export blocked: {exc}")
+        if "packet_manifest" in st.session_state:
+            st.json(st.session_state["packet_manifest"])
+        if "packet_bytes" in st.session_state:
+            st.download_button("Download draft packet (ZIP)", st.session_state["packet_bytes"],
+                               file_name="synthetic-review-packet.zip", mime="application/zip", on_click="ignore")
+    else:
+        st.session_state.pop("packet_manifest", None)
+        st.session_state.pop("packet_bytes", None)
