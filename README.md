@@ -79,3 +79,13 @@ Not implemented: full MACRS tables, complete bonus depreciation qualification, b
 ## Pre-pilot release checklist
 
 Before any CPA-firm pilot: independent code review; CPA-approved test cases; tax-law review for each tax year; security/privacy review; access controls; audit logging; data retention/deletion controls; written client authorization; backup/recovery plan; dependency vulnerability review; and validation against CPA-prepared sample workpapers.
+
+### Synthetic packet workspace
+
+Open **Synthetic packet → Open synthetic packet workspace → Use bundled synthetic sources → Build draft packet**. The ZIP contains an Excel workbook, a PDF summary, a Word review memo and an audit manifest. A failed check can produce a draft exception packet. Only the original Reconciliation tab offers the PASS-only workpaper. No packet action grants sign-off.
+
+For custom synthetic examples use one file per role, named like `ledger.csv`, `1040.xlsx`, or `payroll.pdf`. The filename stem selects the role explicitly. Each file represents a separate workpaper; the pipeline does not infer that a ledger, employee, partnership or employer belongs to the same return. Available roles are listed in the packet tab. Use the bundled files in `sample_data/packet/` as source-layout examples. For other form roles use the producer's named arguments as rows with columns `Field,JSON`. Each argument must be present. Quote monetary strings in JSON. Use explicit zeroes, empty lists or empty objects only when supported by the synthetic facts.
+
+Ledger inputs use dated transactions, with a type and amount, a signed Net, or split debit and credit columns. For custom headers use the existing mapper's keyword arguments in the mapping box. For example, use `{"date_col":"Posted","amount_col":"Value","type_col":null,"date_format":"%m/%d/%Y"}` when Value is explicitly a signed amount. Excel requires an explicit sheet when multiple sheets exist. Preserve high-precision amounts as text. PDF input supports one ruled table per page or pipe-delimited text rows with repeated headers. Scans, pages with images and ambiguous layouts require transcription and review. Form PDF tables use the same Field/JSON contract; this is not general IRS form OCR.
+
+Each run fingerprints the original files and rule build. The memo and summary carry those identifiers and the open findings. For reproducibility, retain the original synthetic files, the recorded control parameters, and the matching source revision. Rebuilding from changed evidence produces a new draft. Independent security/privacy and tax-rule review remain pending.

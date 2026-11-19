@@ -1,0 +1,25 @@
+Field,JSON
+taxpayer_label,"""Synthetic W2-only example"""
+filing_status,"""single"""
+w2_wages,"""60000"""
+w2_withholding,"""5700"""
+w2_social_security_wages,"""60000"""
+w2_medicare_wages,"""60000"""
+form_1099_docs,[]
+draft_1040_for_1099,{}
+schedule_c_gross,"""0"""
+schedule_c_expenses,"""0"""
+schedule_d_transactions,[]
+rentals,[]
+k1_items,[]
+other_adjustments_line_26,"""0"""
+eligible_medical_expenses,"""0"""
+medical_reimbursements,"""0"""
+state_and_local_taxes_paid,"""0"""
+mortgage_interest,"""0"""
+charitable_contributions,"""0"""
+qualifying_children_under_17,0
+other_dependents,0
+estimated_payments,"""0"""
+extension_payment,"""0"""
+refundable_credits,"""0"""

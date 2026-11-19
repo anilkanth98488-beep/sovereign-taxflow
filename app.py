@@ -45,7 +45,7 @@ def clear_if_changed(state_key, current_fingerprint, result_key, *extra_keys):
         st.session_state[state_key] = current_fingerprint
 
 
-tabs = st.tabs(["Reconciliation", "Financial Statements", "Book-to-Tax", "Depreciation", "Document Organizer", "Review queue", "1040 W-2"])
+tabs = st.tabs(["Reconciliation", "Financial Statements", "Book-to-Tax", "Depreciation", "Document Organizer", "Review queue", "1040 W-2", "Synthetic packet"])
 
 with tabs[0]:
     upload = st.file_uploader("Ledger CSV: Date, Amount, Type", type=["csv"], key="ledger_upload")
@@ -244,7 +244,7 @@ with tabs[5]:
     st.dataframe(pd.DataFrame(rows), use_container_width=True)
 
 
-with tabs[-1]:
+with tabs[6]:
     st.caption("2025 Form 1040 • Ordinary W-2 wages and withholding • CPA review pending")
     st.write("Compare one return using exact cents. Use document labels only. Review corrected forms, special wage treatments and whole-dollar rounding separately.")
     inventory = st.text_area("Expected W-2 labels, one per line", "W2-A\nW2-B", key="w2_inventory")
@@ -263,3 +263,59 @@ with tabs[-1]:
         st.json(workpaper)
         st.download_button("Download W-2 workpaper (JSON)", data=json.dumps(workpaper, indent=2),
                            file_name="w2-tieout-2025.json", mime="application/json", on_click="ignore")
+
+with tabs[7]:
+    from modules.workpaper_packet import ROLES, VERSION, run_packet
+    from modules.packet_export import export_packet
+
+    st.caption("2025 synthetic workpaper packet. Every export is a draft for reviewer sign-off.")
+    if st.checkbox("Open synthetic packet workspace", key="packet_enable"):
+        demo = st.checkbox("Use bundled synthetic sources", key="packet_sample")
+        sources = {}
+        source_errors = []
+        if demo:
+            for path in sorted((Path(__file__).parent / "sample_data/packet").glob("*.csv")):
+                sources[path.stem] = (path.name, path.read_bytes(), None)
+        else:
+            st.write("Use synthetic files only. Name each file for its role. Ledger files accept bank columns; form files use Field and JSON columns.")
+            st.caption("Role names: " + ", ".join(ROLES))
+            uploads = st.file_uploader("Synthetic packet sources", type=["csv", "xlsx", "pdf"],
+                                       accept_multiple_files=True, key="packet_uploads")
+            for upload in uploads:
+                role = Path(upload.name).stem
+                if role in sources or role not in ROLES:
+                    source_errors.append(f"Duplicate or unknown role: {role}")
+                    continue
+                sheet = None
+                if upload.name.lower().endswith(".xlsx"):
+                    sheet = st.text_input(f"{role} worksheet (required for multi-sheet files)",key=f"packet_sheet_{role}") or None
+                sources[role] = (upload.name, upload.getvalue(), sheet)
+        opening_value = st.text_input("Packet opening balance","1000.00",key="packet_opening")
+        closing_value = st.text_input("Packet control balance","1250.00",key="packet_closing")
+        map_text = st.text_input("Explicit ledger column mapping (optional JSON object)","{}",key="packet_mapping")
+        identity = [VERSION, demo, opening_value, closing_value, map_text, source_errors,
+                    [(role, name, sha256(raw).hexdigest(), sheet) for role,(name,raw,sheet) in sorted(sources.items())]]
+        clear_if_changed("packet_identity", sha256(json.dumps(identity).encode()).hexdigest(),
+                         "packet_bytes", "packet_manifest")
+        for error in source_errors:
+            st.error(error)
+        if sources and not source_errors and st.button("Build draft packet",key="packet_build"):
+            st.session_state.pop("packet_bytes", None)
+            st.session_state.pop("packet_manifest", None)
+            try:
+                mapping = json.loads(map_text)
+                if not isinstance(mapping,dict):
+                    raise ValueError("Mapping must be a JSON object.")
+                packet = run_packet(sources, opening_value, closing_value, mapping=mapping)
+                st.session_state["packet_manifest"] = packet
+                st.session_state["packet_bytes"] = export_packet(packet)
+            except Exception as exc:
+                st.error(f"Packet export blocked: {exc}")
+        if "packet_manifest" in st.session_state:
+            st.json(st.session_state["packet_manifest"])
+        if "packet_bytes" in st.session_state:
+            st.download_button("Download draft packet (ZIP)", st.session_state["packet_bytes"],
+                               file_name="synthetic-review-packet.zip", mime="application/zip", on_click="ignore")
+    else:
+        st.session_state.pop("packet_manifest", None)
+        st.session_state.pop("packet_bytes", None)

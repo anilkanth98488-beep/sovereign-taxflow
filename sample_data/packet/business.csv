@@ -1,0 +1,10 @@
+Field,JSON
+entity_form,"""1065"""
+tax_year,2025
+gross_receipts,"""10000"""
+cogs,"""0"""
+operating_expenses,"""0"""
+book_to_tax_items,[]
+total_assets,"""0"""
+reportable_partner_50pct,false
+partner_allocations,"[{""partner"":""Synthetic A"",""profit_pct"":""60""},{""partner"":""Synthetic B"",""profit_pct"":""30""}]"

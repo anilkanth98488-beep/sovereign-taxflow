@@ -1,0 +1,4 @@
+Field,JSON
+quarterly_941s,"[{""quarter"":""Q1"",""wages_line_2"":""25000"",""fed_withholding_line_3"":""3000"",""ss_wages_line_5a"":""25000"",""medicare_wages_line_5c"":""25000""},{""quarter"":""Q2"",""wages_line_2"":""25000"",""fed_withholding_line_3"":""3000"",""ss_wages_line_5a"":""25000"",""medicare_wages_line_5c"":""25000""},{""quarter"":""Q3"",""wages_line_2"":""25000"",""fed_withholding_line_3"":""3000"",""ss_wages_line_5a"":""25000"",""medicare_wages_line_5c"":""25000""},{""quarter"":""Q4"",""wages_line_2"":""25000"",""fed_withholding_line_3"":""3000"",""ss_wages_line_5a"":""25000"",""medicare_wages_line_5c"":""25000""}]"
+annual_w3_totals,"{""box_1_wages"":""100000"",""box_2_withholding"":""11500"",""box_3_ss_wages"":""100000"",""box_5_medicare_wages"":""100000""}"
+tax_year,2025

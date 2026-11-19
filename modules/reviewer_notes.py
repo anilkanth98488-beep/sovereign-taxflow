@@ -459,6 +459,19 @@ def draft_reviewer_notes(
             "notes": [],
         }
 
+    if payload.get("schema") == "packet_exceptions_v1":
+        findings = payload.get("findings")
+        if not isinstance(findings, list) or any(
+            not isinstance(row, dict) or not all(isinstance(row.get(k), str) for k in ("source", "status", "detail"))
+            for row in findings
+        ):
+            return {"status": "UNSUPPORTED_SCHEMA", "notes": [], "draft_only": True, "approval_granted": False}
+        notes = [{"source": row["source"], "status": row["status"],
+                  "draft_question": f"{row['detail']} Which source record resolves this finding?",
+                  "draft_only": True, "approval_granted": False} for row in findings]
+        return {"status": "DRAFT_READY" if notes else "NO_EXCEPTIONS", "notes": notes,
+                "draft_only": True, "approval_granted": False, "note_count": len(notes)}
+
     schema = _detect_schema(payload)
     if schema == "UNSUPPORTED_SCHEMA":
         return {
